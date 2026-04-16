@@ -5,11 +5,28 @@
     <vendor>hanbinhsh</vendor>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.java</depends>
+    <depends>com.intellij.modules.xml</depends>
 
     <resource-bundle>messages.MyBundle</resource-bundle>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.hanbinhsh.rinneideatoolkit.toolWindow.MyToolWindowFactory" id="MyToolWindow"/>
-        <postStartupActivity implementation="com.github.hanbinhsh.rinneideatoolkit.startup.MyProjectActivity" />
+        <toolWindow
+                id="Method Call Graph"
+                stripeTitle="%toolWindow.graphTitle"
+                anchor="right"
+                canCloseContents="true"
+                factoryClass="com.github.hanbinhsh.rinneideatoolkit.toolWindow.MethodCallGraphToolWindowFactory"/>
     </extensions>
+
+    <actions>
+        <action
+                id="RinneIdeaToolkit.AnalyzeMethodCalls"
+                class="com.github.hanbinhsh.rinneideatoolkit.actions.AnalyzeMethodCallsAction"
+                text="%action.analyzeMethodCalls.text"
+                description="%action.analyzeMethodCalls.description">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

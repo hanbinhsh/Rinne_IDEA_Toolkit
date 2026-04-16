@@ -1,6 +1,13 @@
+import org.gradle.api.provider.Provider
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+
+fun Provider<String>.splitCsv() = map { value ->
+    value.split(',')
+        .map(String::trim)
+        .filter(String::isNotEmpty)
+}
 
 plugins {
     id("java") // Java support
@@ -39,13 +46,13 @@ dependencies {
         intellijIdea(providers.gradleProperty("platformVersion"))
 
         // Plugin Dependencies. Uses `platformBundledPlugins` property from the gradle.properties file for bundled IntelliJ Platform plugins.
-        bundledPlugins(providers.gradleProperty("platformBundledPlugins").map { it.split(',') })
+        bundledPlugins(providers.gradleProperty("platformBundledPlugins").splitCsv())
 
         // Plugin Dependencies. Uses `platformPlugins` property from the gradle.properties file for plugin from JetBrains Marketplace.
-        plugins(providers.gradleProperty("platformPlugins").map { it.split(',') })
+        plugins(providers.gradleProperty("platformPlugins").splitCsv())
 
         // Module Dependencies. Uses `platformBundledModules` property from the gradle.properties file for bundled IntelliJ Platform modules.
-        bundledModules(providers.gradleProperty("platformBundledModules").map { it.split(',') })
+        bundledModules(providers.gradleProperty("platformBundledModules").splitCsv())
 
         testFramework(TestFrameworkType.Platform)
     }
@@ -134,6 +141,20 @@ tasks {
 
     publishPlugin {
         dependsOn(patchChangelog)
+    }
+
+    // Searchable options traversal may crash in headless builds when bundled IDE configurables
+    // read machine-specific environment values (for example malformed Gradle home paths).
+    // We don't contribute Settings/Search options via Configurable metadata, so skipping this
+    // step keeps local/CI packaging stable without affecting runtime behavior.
+    named("buildSearchableOptions") {
+        enabled = false
+    }
+    named("prepareJarSearchableOptions") {
+        enabled = false
+    }
+    named("jarSearchableOptions") {
+        enabled = false
     }
 }
 

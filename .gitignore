@@ -1,7 +1,39 @@
+# OS files
 .DS_Store
-.gradle
-.idea
-.intellijPlatform
-.kotlin
-.qodana
-build
+Thumbs.db
+
+# Gradle / Kotlin
+.gradle/
+.gradle-home/
+.kotlin/
+build/
+out/
+
+# IntelliJ Platform plugin sandbox and caches
+.intellijPlatform/
+
+# IDE files
+.idea/
+.run/
+.vscode/
+*.iml
+
+# Local generated mirrors / temporary sources
+bin/
+
+# Qodana local data
+.qodana/
+
+# Logs and heap dumps
+*.log
+*.hprof
+hs_err_pid*
+replay_pid*
+
+# Plugin artifacts
+*.zip
+
+# Environment / local overrides
+.env
+.env.*
+!.env.example
