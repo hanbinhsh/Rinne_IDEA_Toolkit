@@ -8,6 +8,7 @@ import com.github.hanbinhsh.rinneideatoolkit.model.SequenceMessageKind
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceParticipant
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceScenario
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.ui.Messages
 import com.intellij.psi.PsiMethod
@@ -21,13 +22,9 @@ import java.awt.Dimension
 import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
-import java.awt.Image
 import java.awt.Point
 import java.awt.Rectangle
 import java.awt.RenderingHints
-import java.awt.datatransfer.DataFlavor
-import java.awt.datatransfer.Transferable
-import java.awt.datatransfer.UnsupportedFlavorException
 import java.awt.event.MouseEvent
 import java.awt.geom.Path2D
 import java.awt.image.BufferedImage
@@ -149,7 +146,9 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
                 }
                 val translatedPoint = toDiagramPoint(e.point)
                 val messageLayout = findMessageAt(translatedPoint) ?: return
-                val target = messageLayout.message.pointer.element ?: return
+                val target = ReadAction.compute<com.intellij.psi.PsiElement?, RuntimeException> {
+                    messageLayout.message.pointer.element
+                } ?: return
                 ApplicationManager.getApplication().invokeLater {
                     (target as? Navigatable)?.navigate(true)
                 }
@@ -223,6 +222,22 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
 
     fun copyImageToClipboard() {
         CopyPasteManager.getInstance().setContents(ImageTransferable(renderToImage(useWhiteBackground = useWhiteBackgroundForCopyExport)))
+    }
+
+    fun exportToSvg(file: File) {
+        file.writeText(renderToSvg(), Charsets.UTF_8)
+    }
+
+    fun copySvgToClipboard() {
+        copyTextToClipboard(renderToSvg())
+    }
+
+    fun exportToMermaid(file: File) {
+        file.writeText(renderToMermaid(), Charsets.UTF_8)
+    }
+
+    fun copyMermaidToClipboard() {
+        copyTextToClipboard(renderToMermaid())
     }
 
     override fun getToolTipText(event: MouseEvent): String? {
@@ -761,6 +776,58 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
         return image
     }
 
+    private fun renderToSvg(scenarioLayout: ScenarioLayout? = null): String {
+        val image = renderToImage(scenarioLayout, useWhiteBackground = useWhiteBackgroundForCopyExport)
+        val title = scenarioLayout?.title ?: MyBundle.message("sequence.title")
+        return buildEmbeddedSvg(
+            image = image,
+            width = image.width,
+            height = image.height,
+            title = title,
+        )
+    }
+
+    private fun renderToMermaid(scenarioLayout: ScenarioLayout? = null): String {
+        val layouts = scenarioLayout?.let(::listOf) ?: scenarioLayouts
+        if (layouts.isEmpty()) {
+            return "sequenceDiagram\n"
+        }
+        return buildString {
+            appendLine("sequenceDiagram")
+            layouts.forEachIndexed { index, layout ->
+                val participantIds = linkedMapOf<String, String>()
+                layout.participants.forEach { participant ->
+                    val participantId = mermaidNodeId("participant_${participant.participant.classQualifiedName}")
+                    participantIds[participant.participant.classQualifiedName] = participantId
+                    appendLine("    participant $participantId as \"${mermaidLabel(participant.participant.className)}\"")
+                }
+                if (index > 0) {
+                    appendLine("    %%")
+                }
+                val firstId = layout.participants.firstOrNull()?.participant?.classQualifiedName?.let(participantIds::get)
+                val lastId = layout.participants.lastOrNull()?.participant?.classQualifiedName?.let(participantIds::get)
+                if (firstId != null && lastId != null) {
+                    appendLine("""    Note over $firstId${if (lastId != firstId) ",$lastId" else ""}: ${mermaidLabel(layout.title)}""")
+                }
+                layout.messages.forEach { message ->
+                    val fromId = participantIds[message.message.fromClassQualifiedName] ?: return@forEach
+                    val toId = participantIds[message.message.toClassQualifiedName] ?: return@forEach
+                    val arrow = when (message.message.kind) {
+                        SequenceMessageKind.CALL -> "->>"
+                        SequenceMessageKind.RETURN -> "-->>"
+                        SequenceMessageKind.CREATE -> "->>"
+                    }
+                    val label = when {
+                        message.message.methodDisplaySignature.isNotBlank() -> message.message.methodDisplaySignature
+                        message.message.kind == SequenceMessageKind.RETURN -> MyBundle.message("sequence.returnMessageLabel")
+                        else -> MyBundle.message("sequence.createMessageLabel")
+                    }
+                    appendLine("""    $fromId$arrow$toId: ${mermaidLabel(label)}""")
+                }
+            }
+        }
+    }
+
     private fun setZoom(newZoomFactor: Double) {
         val clamped = newZoomFactor.coerceIn(MIN_ZOOM, MAX_ZOOM)
         if (clamped == zoomFactor) {
@@ -840,12 +907,14 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
         val messageLayout = findMessageAt(translatedPoint)
         val scenarioLayout = findScenarioAt(translatedPoint) ?: return
         val menu = JPopupMenu()
-        val targetMethod = messageLayout?.message?.pointer?.element as? PsiMethod
+        val targetMethod = ReadAction.compute<PsiMethod?, RuntimeException> {
+            messageLayout?.message?.pointer?.element as? PsiMethod
+        }
         if (targetMethod != null) {
             menu.add(JMenuItem(MyBundle.message("toolWindow.menu.sequenceAnalysis")).apply {
                 addActionListener { onSequenceAnalysisRequested?.invoke(targetMethod) }
             })
-            messageLayout.highlightKey?.let { highlightKey ->
+            messageLayout?.highlightKey?.let { highlightKey ->
                 val messageKey = if (highlightedMethod == highlightKey) {
                     "sequence.menu.clearMethodHighlight"
                 } else {
@@ -859,19 +928,41 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
         }
         menu.add(JMenuItem(MyBundle.message("sequence.menu.openScenarioSequence")).apply {
             addActionListener {
-                scenarioLayout.scenario.entryPointer.element?.let { method ->
+                ReadAction.compute<PsiMethod?, RuntimeException> {
+                    scenarioLayout.scenario.entryPointer.element
+                }?.let { method ->
                     onSequenceAnalysisRequested?.invoke(method)
                 }
             }
         })
         menu.addSeparator()
-        menu.add(JMenuItem(MyBundle.message("sequence.menu.copyScenario")).apply {
-            addActionListener { copyScenarioImage(scenarioLayout) }
-        })
-        menu.add(JMenuItem(MyBundle.message("sequence.menu.exportScenario")).apply {
-            addActionListener { exportScenarioImage(scenarioLayout) }
-        })
+        addScenarioCopyMenuItems(menu, scenarioLayout)
+        addScenarioExportMenuItems(menu, scenarioLayout)
         menu.show(event.component, event.x, event.y)
+    }
+
+    private fun addScenarioCopyMenuItems(menu: JPopupMenu, layout: ScenarioLayout) {
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.copyScenarioImage")).apply {
+            addActionListener { copyScenarioImage(layout) }
+        })
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.copyScenarioSvg")).apply {
+            addActionListener { copyScenarioSvg(layout) }
+        })
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.copyScenarioMermaid")).apply {
+            addActionListener { copyScenarioMermaid(layout) }
+        })
+    }
+
+    private fun addScenarioExportMenuItems(menu: JPopupMenu, layout: ScenarioLayout) {
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.exportScenarioImage")).apply {
+            addActionListener { exportScenarioImage(layout) }
+        })
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.exportScenarioSvg")).apply {
+            addActionListener { exportScenarioSvg(layout) }
+        })
+        menu.add(JMenuItem(MyBundle.message("sequence.menu.exportScenarioMermaid")).apply {
+            addActionListener { exportScenarioMermaid(layout) }
+        })
     }
 
     private fun copyScenarioImage(layout: ScenarioLayout) {
@@ -883,14 +974,38 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
             Messages.showErrorDialog(
                 this,
                 MyBundle.message("toolWindow.copyFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("sequence.menu.copyScenario"),
+                MyBundle.message("sequence.menu.copyScenarioImage"),
+            )
+        }
+    }
+
+    private fun copyScenarioSvg(layout: ScenarioLayout) {
+        runCatching {
+            copyTextToClipboard(renderToSvg(layout))
+        }.onFailure { error ->
+            Messages.showErrorDialog(
+                this,
+                MyBundle.message("toolWindow.copyFailed", error.message ?: error.javaClass.simpleName),
+                MyBundle.message("sequence.menu.copyScenarioSvg"),
+            )
+        }
+    }
+
+    private fun copyScenarioMermaid(layout: ScenarioLayout) {
+        runCatching {
+            copyTextToClipboard(renderToMermaid(layout))
+        }.onFailure { error ->
+            Messages.showErrorDialog(
+                this,
+                MyBundle.message("toolWindow.copyFailed", error.message ?: error.javaClass.simpleName),
+                MyBundle.message("sequence.menu.copyScenarioMermaid"),
             )
         }
     }
 
     private fun exportScenarioImage(layout: ScenarioLayout) {
         val chooser = JFileChooser().apply {
-            dialogTitle = MyBundle.message("sequence.menu.exportScenario")
+            dialogTitle = MyBundle.message("sequence.menu.exportScenarioImage")
             fileSelectionMode = JFileChooser.FILES_ONLY
             isAcceptAllFileFilterUsed = false
             fileFilter = FileNameExtensionFilter(MyBundle.message("toolWindow.exportFileFilter"), "png")
@@ -914,13 +1029,78 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
             Messages.showInfoMessage(
                 this,
                 MyBundle.message("toolWindow.exportSuccess", outputFile.absolutePath),
-                MyBundle.message("sequence.menu.exportScenario"),
+                MyBundle.message("sequence.menu.exportScenarioImage"),
             )
         }.onFailure { error ->
             Messages.showErrorDialog(
                 this,
                 MyBundle.message("toolWindow.exportFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("sequence.menu.exportScenario"),
+                MyBundle.message("sequence.menu.exportScenarioImage"),
+            )
+        }
+    }
+
+    private fun exportScenarioSvg(layout: ScenarioLayout) {
+        exportScenarioText(
+            titleKey = "sequence.menu.exportScenarioSvg",
+            extension = "svg",
+            fileFilterKey = "toolWindow.exportSvgFileFilter",
+            defaultFileName = "${sanitizeFileSegment(layout.titleFileName)}${MyBundle.message("sequence.exportScenarioFileSuffix")}.svg",
+        ) { file ->
+            file.writeText(renderToSvg(layout), Charsets.UTF_8)
+        }
+    }
+
+    private fun exportScenarioMermaid(layout: ScenarioLayout) {
+        exportScenarioText(
+            titleKey = "sequence.menu.exportScenarioMermaid",
+            extension = "mmd",
+            fileFilterKey = "toolWindow.exportMermaidFileFilter",
+            defaultFileName = "${sanitizeFileSegment(layout.titleFileName)}${MyBundle.message("sequence.exportScenarioFileSuffix")}.mmd",
+        ) { file ->
+            file.writeText(renderToMermaid(layout), Charsets.UTF_8)
+        }
+    }
+
+    private fun exportScenarioText(
+        titleKey: String,
+        extension: String,
+        fileFilterKey: String,
+        defaultFileName: String,
+        writer: (File) -> Unit,
+    ) {
+        val chooser = JFileChooser().apply {
+            dialogTitle = MyBundle.message(titleKey)
+            fileSelectionMode = JFileChooser.FILES_ONLY
+            isAcceptAllFileFilterUsed = false
+            fileFilter = FileNameExtensionFilter(MyBundle.message(fileFilterKey), extension)
+            selectedFile = File(defaultFileName)
+        }
+
+        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+            return
+        }
+
+        val selected = chooser.selectedFile ?: return
+        val outputFile = if (selected.extension.equals(extension, ignoreCase = true)) {
+            selected
+        } else {
+            File(selected.parentFile ?: File("."), "${selected.name}.$extension")
+        }
+
+        runCatching {
+            writer(outputFile)
+        }.onSuccess {
+            Messages.showInfoMessage(
+                this,
+                MyBundle.message("toolWindow.exportTextSuccess", outputFile.absolutePath),
+                MyBundle.message(titleKey),
+            )
+        }.onFailure { error ->
+            Messages.showErrorDialog(
+                this,
+                MyBundle.message("toolWindow.exportTextFailed", error.message ?: error.javaClass.simpleName),
+                MyBundle.message(titleKey),
             )
         }
     }
@@ -1155,19 +1335,6 @@ class SequenceDiagramPanel : JPanel(), Scrollable {
     private enum class ArrowDirection {
         LEFT,
         RIGHT,
-    }
-
-    private class ImageTransferable(private val image: Image) : Transferable {
-        override fun getTransferDataFlavors(): Array<DataFlavor> = arrayOf(DataFlavor.imageFlavor)
-
-        override fun isDataFlavorSupported(flavor: DataFlavor): Boolean = flavor == DataFlavor.imageFlavor
-
-        override fun getTransferData(flavor: DataFlavor): Any {
-            if (!isDataFlavorSupported(flavor)) {
-                throw UnsupportedFlavorException(flavor)
-            }
-            return image
-        }
     }
 
     private companion object {

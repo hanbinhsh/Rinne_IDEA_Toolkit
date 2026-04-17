@@ -9,6 +9,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.util.ui.JBUI
 import com.github.hanbinhsh.rinneideatoolkit.MyBundle
+import com.github.hanbinhsh.rinneideatoolkit.model.ClipboardExportFormat
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphOptions
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceColorSettings
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceToolbarToggleId
@@ -25,6 +26,7 @@ import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JColorChooser
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -50,6 +52,10 @@ class SequenceDiagramSettingsDialog(
         MyBundle.message("toolWindow.whiteBackground"),
         preferences.showWhiteBackgroundForExport,
     )
+    private val copyButtonFormatComboBox = JComboBox(ClipboardExportFormat.values()).apply {
+        selectedItem = preferences.copyButtonFormat
+        renderer = ExportFormatListCellRenderer()
+    }
     private val showReturnMessagesCheckBox = JBCheckBox(
         MyBundle.message("sequence.showReturnMessages"),
         preferences.showReturnMessages,
@@ -162,6 +168,7 @@ class SequenceDiagramSettingsDialog(
             .keys,
         showWhiteBackgroundForExport = whiteBackgroundCheckBox.isSelected,
         showWhiteBackgroundForCopy = whiteBackgroundCheckBox.isSelected,
+        copyButtonFormat = copyButtonFormatComboBox.selectedItem as? ClipboardExportFormat ?: ClipboardExportFormat.IMAGE,
         showReturnMessages = showReturnMessagesCheckBox.isSelected,
         showActivationBars = showActivationBarsCheckBox.isSelected,
         showCreateMessages = showCreateMessagesCheckBox.isSelected,
@@ -228,6 +235,7 @@ class SequenceDiagramSettingsDialog(
         showPrivateMethodsCheckBox.isSelected = preferences.sequenceOptions.showPrivateMethods
         showMapperTablesCheckBox.isSelected = preferences.sequenceOptions.showMapperTables
         whiteBackgroundCheckBox.isSelected = preferences.showWhiteBackgroundForExport
+        copyButtonFormatComboBox.selectedItem = preferences.copyButtonFormat
         showReturnMessagesCheckBox.isSelected = preferences.showReturnMessages
         showActivationBarsCheckBox.isSelected = preferences.showActivationBars
         showCreateMessagesCheckBox.isSelected = preferences.showCreateMessages
@@ -288,6 +296,8 @@ class SequenceDiagramSettingsDialog(
             add(showCreateMessagesCheckBox)
             add(Box.createVerticalStrut(8))
             add(whiteBackgroundCheckBox)
+            add(Box.createVerticalStrut(12))
+            add(buildLabeledField("settings.copyButtonFormat", copyButtonFormatComboBox))
             add(Box.createVerticalStrut(16))
             add(JBLabel(MyBundle.message("sequence.settings.switchesHint")).apply {
                 foreground = JBColor.GRAY
@@ -379,6 +389,17 @@ class SequenceDiagramSettingsDialog(
             border = JBUI.Borders.empty()
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             verticalScrollBar.unitIncrement = 16
+        }
+
+    private fun buildLabeledField(labelKey: String, field: JComponent): JComponent =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(JBLabel(MyBundle.message(labelKey)).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+            add(Box.createVerticalStrut(4))
+            add(field.apply { alignmentX = Component.LEFT_ALIGNMENT })
         }
 
     private fun addColorRow(

@@ -29,13 +29,9 @@ import java.awt.Font
 import java.awt.GradientPaint
 import java.awt.Graphics
 import java.awt.Graphics2D
-import java.awt.Image
 import java.awt.Point
 import java.awt.Rectangle
 import java.awt.RenderingHints
-import java.awt.datatransfer.DataFlavor
-import java.awt.datatransfer.Transferable
-import java.awt.datatransfer.UnsupportedFlavorException
 import java.awt.event.MouseEvent
 import java.awt.geom.Path2D
 import java.awt.image.BufferedImage
@@ -352,6 +348,22 @@ class MethodCallGraphPanel(
         CopyPasteManager.getInstance().setContents(ImageTransferable(renderToImage()))
     }
 
+    fun exportToSvg(file: File) {
+        file.writeText(renderToSvg(), Charsets.UTF_8)
+    }
+
+    fun copySvgToClipboard() {
+        copyTextToClipboard(renderToSvg())
+    }
+
+    fun exportToMermaid(file: File) {
+        file.writeText(renderToMermaid(), Charsets.UTF_8)
+    }
+
+    fun copyMermaidToClipboard() {
+        copyTextToClipboard(renderToMermaid())
+    }
+
     override fun getToolTipText(event: MouseEvent): String? {
         val translatedPoint = toGraphPoint(event.point)
         findGroupActionAt(translatedPoint)?.let { return it.tooltip }
@@ -418,6 +430,60 @@ class MethodCallGraphPanel(
             graphics.dispose()
         }
         return image
+    }
+
+    private fun renderToSvg(): String {
+        val image = renderToImage()
+        return buildEmbeddedSvg(
+            image = image,
+            width = image.width,
+            height = image.height,
+            title = MyBundle.message("toolWindow.graphTitle"),
+        )
+    }
+
+    private fun renderToMermaid(): String {
+        val currentGraph = displayGraph() ?: return "flowchart LR\n"
+        val groupedNodes = currentGraph.nodes.groupBy { it.classQualifiedName }
+        val nodeIdMap = currentGraph.nodes.associate { it.id to mermaidNodeId(it.id) }
+        return buildString {
+            appendLine("flowchart LR")
+            groupedNodes.entries
+                .sortedWith(
+                    compareBy<Map.Entry<String, List<GraphNode>>> { entry -> entry.value.minOfOrNull { node -> node.depth } ?: 0 }
+                        .thenBy { entry -> entry.value.firstOrNull()?.className ?: entry.key },
+                )
+                .forEach { (groupId, nodes) ->
+                val groupLabel = nodes.firstOrNull()?.tableName ?: nodes.firstOrNull()?.className ?: groupId
+                appendLine("""    subgraph ${mermaidNodeId("group_$groupId")}["${mermaidLabel(groupLabel)}"]""")
+                nodes.sortedWith(compareBy<GraphNode> { it.depth }.thenBy { it.displaySignature }).forEach { node ->
+                    val mermaidId = nodeIdMap.getValue(node.id)
+                    appendLine("        $mermaidId${mermaidNodeShape(node)}")
+                }
+                appendLine("    end")
+                }
+            currentGraph.edges.forEach { edge ->
+                val fromId = nodeIdMap[edge.fromNodeId] ?: return@forEach
+                val toId = nodeIdMap[edge.toNodeId] ?: return@forEach
+                appendLine("    $fromId --> $toId")
+            }
+        }
+    }
+
+    private fun mermaidNodeShape(node: GraphNode): String {
+        val label = when (node.nodeKind) {
+            GraphNodeKind.METHOD -> "${node.className}.${node.displaySignature}"
+            GraphNodeKind.DATABASE_TABLE -> node.tableName ?: node.className
+            GraphNodeKind.DATABASE_COLUMN -> node.columnName ?: node.displaySignature
+            GraphNodeKind.DATABASE_COLUMN_OPERATION ->
+                "${node.columnName ?: "column"} ${node.displaySignature}"
+        }
+        return when (node.nodeKind) {
+            GraphNodeKind.DATABASE_TABLE -> """["${mermaidLabel(label)}"]"""
+            GraphNodeKind.DATABASE_COLUMN -> """["${mermaidLabel(label)}"]"""
+            GraphNodeKind.DATABASE_COLUMN_OPERATION -> """(["${mermaidLabel(label)}"])"""
+            GraphNodeKind.METHOD -> """["${mermaidLabel(label)}"]"""
+        }
     }
 
     private fun rebuildLayout() {
@@ -2408,19 +2474,6 @@ class MethodCallGraphPanel(
         RIGHT,
         UP,
         DOWN,
-    }
-
-    private class ImageTransferable(private val image: Image) : Transferable {
-        override fun getTransferDataFlavors(): Array<DataFlavor> = arrayOf(DataFlavor.imageFlavor)
-
-        override fun isDataFlavorSupported(flavor: DataFlavor): Boolean = flavor == DataFlavor.imageFlavor
-
-        override fun getTransferData(flavor: DataFlavor): Any {
-            if (!isDataFlavorSupported(flavor)) {
-                throw UnsupportedFlavorException(flavor)
-            }
-            return image
-        }
     }
 
     private companion object {

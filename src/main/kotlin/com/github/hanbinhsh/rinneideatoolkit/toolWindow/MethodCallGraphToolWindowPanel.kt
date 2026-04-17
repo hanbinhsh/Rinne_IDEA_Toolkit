@@ -1,6 +1,7 @@
 package com.github.hanbinhsh.rinneideatoolkit.toolWindow
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
@@ -13,6 +14,7 @@ import com.intellij.ui.components.JBPanel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import com.github.hanbinhsh.rinneideatoolkit.MyBundle
+import com.github.hanbinhsh.rinneideatoolkit.model.ClipboardExportFormat
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphOptions
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphUiPreferences
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphViewState
@@ -33,6 +35,7 @@ import java.util.concurrent.ConcurrentHashMap
 import javax.swing.JButton
 import javax.swing.JFileChooser
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JSlider
 import javax.swing.SwingUtilities
 import javax.swing.filechooser.FileNameExtensionFilter
@@ -61,7 +64,7 @@ class MethodCallGraphToolWindowPanel(
     private val drawEdgesOnTopCheckBox = JBCheckBox(MyBundle.message("toolWindow.drawEdgesOnTop"))
     private val drawArrowheadsOnTopCheckBox = JBCheckBox(MyBundle.message("toolWindow.drawArrowheadsOnTop"))
     private val whiteBackgroundCheckBox = JBCheckBox(MyBundle.message("toolWindow.whiteBackground"))
-    private val exportButton = JButton(MyBundle.message("toolWindow.exportImage"))
+    private val exportButton = JButton(MyBundle.message("toolWindow.exportMenu"))
     private val copyImageButton = JButton(MyBundle.message("toolWindow.copyImage"))
     private val zoomSlider = JSlider(25, 200, 100).apply {
         preferredSize = JBUI.size(132, preferredSize.height)
@@ -213,10 +216,10 @@ class MethodCallGraphToolWindowPanel(
             openSettingsDialog(project)
         }
         exportButton.addActionListener {
-            exportGraphImage()
+            showGraphExportMenu()
         }
         copyImageButton.addActionListener {
-            copyGraphImage()
+            copyGraph()
         }
         zoomSlider.addChangeListener {
             graphPanel.setZoomPercent(zoomSlider.value)
@@ -280,6 +283,7 @@ class MethodCallGraphToolWindowPanel(
     private fun applyUiPreferences(preferences: GraphUiPreferences) {
         rebuildOptionsPanel(preferences.visibleToolbarToggles)
         whiteBackgroundCheckBox.isSelected = preferences.showWhiteBackgroundForExport
+        copyImageButton.text = MyBundle.message(clipboardButtonLabel(preferences.copyButtonFormat))
         graphPanel.useWhiteBackgroundForExport = preferences.showWhiteBackgroundForExport
         sequenceContents.values.forEach { content ->
             (content.component as? SequenceDiagramToolWindowPanel)?.useWhiteBackgroundForCopyExport =
@@ -314,13 +318,66 @@ class MethodCallGraphToolWindowPanel(
         graphDataService.updateOptions(updatedPreferences.graphOptions)
     }
 
-    private fun exportGraphImage() {
+    private fun showGraphExportMenu() {
+        JPopupMenu().apply {
+            add(createGraphExportMenuItem(ClipboardExportFormat.IMAGE))
+            add(createGraphExportMenuItem(ClipboardExportFormat.SVG))
+            add(createGraphExportMenuItem(ClipboardExportFormat.MERMAID))
+            addSeparator()
+            add(createGraphCopyMenuItem(ClipboardExportFormat.IMAGE))
+            add(createGraphCopyMenuItem(ClipboardExportFormat.SVG))
+            add(createGraphCopyMenuItem(ClipboardExportFormat.MERMAID))
+        }.show(exportButton, 0, exportButton.height)
+    }
+
+    private fun createGraphExportMenuItem(format: ClipboardExportFormat) =
+        javax.swing.JMenuItem(
+            MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.exportImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.exportSvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaid"
+                },
+            ),
+        ).apply {
+            addActionListener { exportGraph(format) }
+        }
+
+    private fun createGraphCopyMenuItem(format: ClipboardExportFormat) =
+        javax.swing.JMenuItem(
+            MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.copyImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.copySvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.copyMermaid"
+                },
+            ),
+        ).apply {
+            addActionListener { copyGraph(format) }
+        }
+
+    private fun exportGraph(format: ClipboardExportFormat) {
         val chooser = JFileChooser().apply {
-            dialogTitle = MyBundle.message("toolWindow.exportImage")
+            dialogTitle = MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.exportImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.exportSvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaid"
+                },
+            )
             fileSelectionMode = JFileChooser.FILES_ONLY
             isAcceptAllFileFilterUsed = false
-            fileFilter = FileNameExtensionFilter(MyBundle.message("toolWindow.exportFileFilter"), "png")
-            selectedFile = File(buildSuggestedFileName())
+            fileFilter = FileNameExtensionFilter(
+                MyBundle.message(
+                    when (format) {
+                        ClipboardExportFormat.IMAGE -> "toolWindow.exportFileFilter"
+                        ClipboardExportFormat.SVG -> "toolWindow.exportSvgFileFilter"
+                        ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaidFileFilter"
+                    },
+                ),
+                format.fileExtension(),
+            )
+            selectedFile = File(buildSuggestedFileName(format.fileExtension()))
         }
 
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
@@ -328,50 +385,80 @@ class MethodCallGraphToolWindowPanel(
         }
 
         val selected = chooser.selectedFile ?: return
-        val outputFile = if (selected.extension.equals("png", ignoreCase = true)) {
+        val extension = format.fileExtension()
+        val outputFile = if (selected.extension.equals(extension, ignoreCase = true)) {
             selected
         } else {
-            File(selected.parentFile ?: File("."), "${selected.name}.png")
+            File(selected.parentFile ?: File("."), "${selected.name}.$extension")
         }
 
         runCatching {
-            graphPanel.exportToPng(outputFile)
+            when (format) {
+                ClipboardExportFormat.IMAGE -> graphPanel.exportToPng(outputFile)
+                ClipboardExportFormat.SVG -> graphPanel.exportToSvg(outputFile)
+                ClipboardExportFormat.MERMAID -> graphPanel.exportToMermaid(outputFile)
+            }
         }.onSuccess {
             Messages.showInfoMessage(
                 this,
-                MyBundle.message("toolWindow.exportSuccess", outputFile.absolutePath),
-                MyBundle.message("toolWindow.exportImage"),
+                MyBundle.message(
+                    if (format == ClipboardExportFormat.IMAGE) "toolWindow.exportSuccess" else "toolWindow.exportTextSuccess",
+                    outputFile.absolutePath,
+                ),
+                chooser.dialogTitle,
             )
         }.onFailure { error ->
             Messages.showErrorDialog(
                 this,
-                MyBundle.message("toolWindow.exportFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("toolWindow.exportImage"),
+                MyBundle.message(
+                    if (format == ClipboardExportFormat.IMAGE) "toolWindow.exportFailed" else "toolWindow.exportTextFailed",
+                    error.message ?: error.javaClass.simpleName,
+                ),
+                chooser.dialogTitle,
             )
         }
     }
 
-    private fun copyGraphImage() {
+    private fun copyGraph() {
+        copyGraph(preferencesService.getPreferences().copyButtonFormat)
+    }
+
+    private fun copyGraph(format: ClipboardExportFormat) {
         runCatching {
-            graphPanel.copyImageToClipboard()
+            when (format) {
+                ClipboardExportFormat.IMAGE -> graphPanel.copyImageToClipboard()
+                ClipboardExportFormat.SVG -> graphPanel.copySvgToClipboard()
+                ClipboardExportFormat.MERMAID -> graphPanel.copyMermaidToClipboard()
+            }
         }.onFailure { error ->
             Messages.showErrorDialog(
                 this,
                 MyBundle.message("toolWindow.copyFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("toolWindow.copyImage"),
+                MyBundle.message(
+                    when (format) {
+                        ClipboardExportFormat.IMAGE -> "toolWindow.copyImage"
+                        ClipboardExportFormat.SVG -> "toolWindow.copySvg"
+                        ClipboardExportFormat.MERMAID -> "toolWindow.copyMermaid"
+                    },
+                ),
             )
         }
     }
 
-    private fun buildSuggestedFileName(): String {
+    private fun buildSuggestedFileName(extension: String): String {
         val className = graphDataService.getState().rootClassDisplayName
             ?: MyBundle.message("toolWindow.exportDefaultFileName")
-        return "$className${MyBundle.message("toolWindow.exportFileSuffix")}.png"
+        return "$className${MyBundle.message("toolWindow.exportFileSuffix")}.$extension"
     }
 
     private fun openSequenceAnalysisTab(project: Project, method: PsiMethod) {
-        val pointer = SmartPointerManager.getInstance(project).createSmartPsiElementPointer(method)
-        val methodId = "${method.containingClass?.qualifiedName ?: method.name}#${method.name}(${method.parameterList.parameters.joinToString(",") { it.type.presentableText }})"
+        val (pointer, methodId, tabTitle) = ReadAction.compute<Triple<com.intellij.psi.SmartPsiElementPointer<PsiMethod>, String, String>, RuntimeException> {
+            Triple(
+                SmartPointerManager.getInstance(project).createSmartPsiElementPointer(method),
+                "${method.containingClass?.qualifiedName ?: method.name}#${method.name}(${method.parameterList.parameters.joinToString(",") { it.type.presentableText }})",
+                MyBundle.message("sequence.tabTitle", method.name),
+            )
+        }
         val contentManager = toolWindow.contentManager
         sequenceContents[methodId]?.let { existing ->
             (existing.component as? SequenceDiagramToolWindowPanel)?.let { panel ->
@@ -390,7 +477,7 @@ class MethodCallGraphToolWindowPanel(
         }
         val content = ContentFactory.getInstance().createContent(
             panel,
-            MyBundle.message("sequence.tabTitle", method.name),
+            tabTitle,
             false,
         ).apply {
             isCloseable = true
@@ -410,4 +497,10 @@ class MethodCallGraphToolWindowPanel(
     }
 
     override fun dispose() = Unit
+
+    private fun ClipboardExportFormat.fileExtension(): String = when (this) {
+        ClipboardExportFormat.IMAGE -> "png"
+        ClipboardExportFormat.SVG -> "svg"
+        ClipboardExportFormat.MERMAID -> "mmd"
+    }
 }

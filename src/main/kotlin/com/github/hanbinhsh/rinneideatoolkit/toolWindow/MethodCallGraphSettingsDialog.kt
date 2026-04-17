@@ -9,6 +9,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTabbedPane
 import com.intellij.util.ui.JBUI
 import com.github.hanbinhsh.rinneideatoolkit.MyBundle
+import com.github.hanbinhsh.rinneideatoolkit.model.ClipboardExportFormat
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphColorSettings
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphOptions
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphUiPreferences
@@ -25,6 +26,7 @@ import javax.swing.Box
 import javax.swing.BoxLayout
 import javax.swing.JButton
 import javax.swing.JColorChooser
+import javax.swing.JComboBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 
@@ -82,6 +84,10 @@ class MethodCallGraphSettingsDialog(
         MyBundle.message("toolWindow.whiteBackground"),
         preferences.showWhiteBackgroundForExport,
     )
+    private val copyButtonFormatComboBox = JComboBox(ClipboardExportFormat.values()).apply {
+        selectedItem = preferences.copyButtonFormat
+        renderer = ExportFormatListCellRenderer()
+    }
 
     private val toolbarToggleCheckBoxes = linkedMapOf<ToolbarToggleId, JBCheckBox>().apply {
         TOOLBAR_TOGGLE_DEFINITIONS.forEach { definition ->
@@ -200,6 +206,7 @@ class MethodCallGraphSettingsDialog(
             .filterValues { it.isSelected }
             .keys,
         showWhiteBackgroundForExport = whiteBackgroundCheckBox.isSelected,
+        copyButtonFormat = copyButtonFormatComboBox.selectedItem as? ClipboardExportFormat ?: ClipboardExportFormat.IMAGE,
         colorSettings = GraphColorSettings(
             rootFillHex = rootFillButtons.lightHex(),
             rootFillDarkHex = rootFillButtons.darkHex(),
@@ -275,6 +282,7 @@ class MethodCallGraphSettingsDialog(
         drawEdgesOnTopCheckBox.isSelected = preferences.graphOptions.drawEdgesOnTop
         drawArrowheadsOnTopCheckBox.isSelected = preferences.graphOptions.drawArrowheadsOnTop
         whiteBackgroundCheckBox.isSelected = preferences.showWhiteBackgroundForExport
+        copyButtonFormatComboBox.selectedItem = preferences.copyButtonFormat
         toolbarToggleCheckBoxes.forEach { (toggleId, checkBox) ->
             checkBox.isSelected = toggleId in preferences.visibleToolbarToggles
         }
@@ -347,6 +355,8 @@ class MethodCallGraphSettingsDialog(
             add(drawArrowheadsOnTopCheckBox)
             add(Box.createVerticalStrut(8))
             add(whiteBackgroundCheckBox)
+            add(Box.createVerticalStrut(12))
+            add(buildLabeledField("settings.copyButtonFormat", copyButtonFormatComboBox))
             add(Box.createVerticalStrut(16))
             add(JBLabel(MyBundle.message("settings.switchesHint")).apply {
                 foreground = JBColor.GRAY
@@ -396,6 +406,17 @@ class MethodCallGraphSettingsDialog(
             border = JBUI.Borders.empty()
             horizontalScrollBarPolicy = JBScrollPane.HORIZONTAL_SCROLLBAR_NEVER
             verticalScrollBar.unitIncrement = 16
+        }
+
+    private fun buildLabeledField(labelKey: String, field: JComponent): JComponent =
+        JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            alignmentX = Component.LEFT_ALIGNMENT
+            add(JBLabel(MyBundle.message(labelKey)).apply {
+                alignmentX = Component.LEFT_ALIGNMENT
+            })
+            add(Box.createVerticalStrut(4))
+            add(field.apply { alignmentX = Component.LEFT_ALIGNMENT })
         }
 
     private fun buildThemeColorsPanel(isDarkMode: Boolean): JComponent {

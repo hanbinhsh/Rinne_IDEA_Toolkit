@@ -16,6 +16,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.concurrency.AppExecutorUtil
 import com.intellij.util.ui.JBUI
 import com.github.hanbinhsh.rinneideatoolkit.MyBundle
+import com.github.hanbinhsh.rinneideatoolkit.model.ClipboardExportFormat
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphOptions
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceDiagram
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceToolbarToggleId
@@ -32,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JButton
 import javax.swing.JFileChooser
 import javax.swing.JPanel
+import javax.swing.JPopupMenu
 import javax.swing.JSlider
 import javax.swing.SwingUtilities
 import javax.swing.filechooser.FileNameExtensionFilter
@@ -55,7 +57,7 @@ class SequenceDiagramToolWindowPanel(
     private val showActivationBarsCheckBox = JBCheckBox(MyBundle.message("sequence.showActivationBars"))
     private val showCreateMessagesCheckBox = JBCheckBox(MyBundle.message("sequence.showCreateMessages"))
     private val whiteBackgroundCheckBox = JBCheckBox(MyBundle.message("toolWindow.whiteBackground"))
-    private val exportButton = JButton(MyBundle.message("toolWindow.exportImage"))
+    private val exportButton = JButton(MyBundle.message("toolWindow.exportMenu"))
     private val copyImageButton = JButton(MyBundle.message("toolWindow.copyImage"))
     private val zoomSlider = JSlider(25, 200, 100).apply {
         preferredSize = JBUI.size(132, preferredSize.height)
@@ -202,8 +204,8 @@ class SequenceDiagramToolWindowPanel(
             }
             useWhiteBackgroundForCopyExport = whiteBackgroundCheckBox.isSelected
         }
-        exportButton.addActionListener { exportDiagramImage() }
-        copyImageButton.addActionListener { copyDiagramImage() }
+        exportButton.addActionListener { showExportMenu() }
+        copyImageButton.addActionListener { copyDiagram() }
         zoomSlider.addChangeListener { sequencePanel.setZoomPercent(zoomSlider.value) }
 
         val connection = project.messageBus.connect(this)
@@ -253,8 +255,10 @@ class SequenceDiagramToolWindowPanel(
         this.state = state
         sequencePanel.useWhiteBackgroundForCopyExport = useWhiteBackgroundForCopyExport
         syncControlsFromPreferences()
-        val targetDisplay = state.targetMethodDisplayName ?: methodPointer.element?.let {
-            "${it.containingClass?.name ?: it.name}.${it.name}"
+        val targetDisplay = state.targetMethodDisplayName ?: ReadAction.compute<String?, RuntimeException> {
+            methodPointer.element?.let {
+                "${it.containingClass?.name ?: it.name}.${it.name}"
+            }
         } ?: MyBundle.message("sequence.unavailable")
         titleLabel.text = targetDisplay
         onTitleChanged?.invoke(MyBundle.message("sequence.tabTitle", targetDisplay.substringAfter('.')))
@@ -286,6 +290,7 @@ class SequenceDiagramToolWindowPanel(
         sequenceOptions = preferences.sequenceOptions
         rebuildOptionsPanel(preferences.visibleToolbarToggles)
         useWhiteBackgroundForCopyExport = preferences.showWhiteBackgroundForExport
+        copyImageButton.text = MyBundle.message(clipboardButtonLabel(preferences.copyButtonFormat))
         sequencePanel.showReturnMessages = preferences.showReturnMessages
         sequencePanel.showActivationBars = preferences.showActivationBars
         sequencePanel.showCreateMessages = preferences.showCreateMessages
@@ -334,13 +339,66 @@ class SequenceDiagramToolWindowPanel(
         refresh()
     }
 
-    private fun exportDiagramImage() {
+    private fun showExportMenu() {
+        JPopupMenu().apply {
+            add(createExportMenuItem(ClipboardExportFormat.IMAGE))
+            add(createExportMenuItem(ClipboardExportFormat.SVG))
+            add(createExportMenuItem(ClipboardExportFormat.MERMAID))
+            addSeparator()
+            add(createCopyMenuItem(ClipboardExportFormat.IMAGE))
+            add(createCopyMenuItem(ClipboardExportFormat.SVG))
+            add(createCopyMenuItem(ClipboardExportFormat.MERMAID))
+        }.show(exportButton, 0, exportButton.height)
+    }
+
+    private fun createExportMenuItem(format: ClipboardExportFormat) =
+        javax.swing.JMenuItem(
+            MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.exportImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.exportSvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaid"
+                },
+            ),
+        ).apply {
+            addActionListener { exportDiagram(format) }
+        }
+
+    private fun createCopyMenuItem(format: ClipboardExportFormat) =
+        javax.swing.JMenuItem(
+            MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.copyImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.copySvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.copyMermaid"
+                },
+            ),
+        ).apply {
+            addActionListener { copyDiagram(format) }
+        }
+
+    private fun exportDiagram(format: ClipboardExportFormat) {
         val chooser = JFileChooser().apply {
-            dialogTitle = MyBundle.message("toolWindow.exportImage")
+            dialogTitle = MyBundle.message(
+                when (format) {
+                    ClipboardExportFormat.IMAGE -> "toolWindow.exportImage"
+                    ClipboardExportFormat.SVG -> "toolWindow.exportSvg"
+                    ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaid"
+                },
+            )
             fileSelectionMode = JFileChooser.FILES_ONLY
             isAcceptAllFileFilterUsed = false
-            fileFilter = FileNameExtensionFilter(MyBundle.message("toolWindow.exportFileFilter"), "png")
-            selectedFile = File(buildSuggestedFileName())
+            fileFilter = FileNameExtensionFilter(
+                MyBundle.message(
+                    when (format) {
+                        ClipboardExportFormat.IMAGE -> "toolWindow.exportFileFilter"
+                        ClipboardExportFormat.SVG -> "toolWindow.exportSvgFileFilter"
+                        ClipboardExportFormat.MERMAID -> "toolWindow.exportMermaidFileFilter"
+                    },
+                ),
+                fileExtension(format),
+            )
+            selectedFile = File(buildSuggestedFileName(fileExtension(format)))
         }
 
         if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
@@ -348,48 +406,79 @@ class SequenceDiagramToolWindowPanel(
         }
 
         val selected = chooser.selectedFile ?: return
-        val outputFile = if (selected.extension.equals("png", ignoreCase = true)) {
+        val extension = fileExtension(format)
+        val outputFile = if (selected.extension.equals(extension, ignoreCase = true)) {
             selected
         } else {
-            File(selected.parentFile ?: File("."), "${selected.name}.png")
+            File(selected.parentFile ?: File("."), "${selected.name}.$extension")
         }
 
         runCatching {
-            sequencePanel.exportToPng(outputFile)
+            when (format) {
+                ClipboardExportFormat.IMAGE -> sequencePanel.exportToPng(outputFile)
+                ClipboardExportFormat.SVG -> sequencePanel.exportToSvg(outputFile)
+                ClipboardExportFormat.MERMAID -> sequencePanel.exportToMermaid(outputFile)
+            }
         }.onSuccess {
             Messages.showInfoMessage(
                 this,
-                MyBundle.message("toolWindow.exportSuccess", outputFile.absolutePath),
-                MyBundle.message("toolWindow.exportImage"),
+                MyBundle.message(
+                    if (format == ClipboardExportFormat.IMAGE) "toolWindow.exportSuccess" else "toolWindow.exportTextSuccess",
+                    outputFile.absolutePath,
+                ),
+                chooser.dialogTitle,
             )
         }.onFailure { error ->
             Messages.showErrorDialog(
                 this,
-                MyBundle.message("toolWindow.exportFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("toolWindow.exportImage"),
+                MyBundle.message(
+                    if (format == ClipboardExportFormat.IMAGE) "toolWindow.exportFailed" else "toolWindow.exportTextFailed",
+                    error.message ?: error.javaClass.simpleName,
+                ),
+                chooser.dialogTitle,
             )
         }
     }
 
-    private fun copyDiagramImage() {
+    private fun copyDiagram() {
+        copyDiagram(preferencesService.getSequencePreferences().copyButtonFormat)
+    }
+
+    private fun copyDiagram(format: ClipboardExportFormat) {
         runCatching {
-            sequencePanel.copyImageToClipboard()
+            when (format) {
+                ClipboardExportFormat.IMAGE -> sequencePanel.copyImageToClipboard()
+                ClipboardExportFormat.SVG -> sequencePanel.copySvgToClipboard()
+                ClipboardExportFormat.MERMAID -> sequencePanel.copyMermaidToClipboard()
+            }
         }.onFailure { error ->
             Messages.showErrorDialog(
                 this,
                 MyBundle.message("toolWindow.copyFailed", error.message ?: error.javaClass.simpleName),
-                MyBundle.message("toolWindow.copyImage"),
+                MyBundle.message(
+                    when (format) {
+                        ClipboardExportFormat.IMAGE -> "toolWindow.copyImage"
+                        ClipboardExportFormat.SVG -> "toolWindow.copySvg"
+                        ClipboardExportFormat.MERMAID -> "toolWindow.copyMermaid"
+                    },
+                ),
             )
         }
     }
 
-    private fun buildSuggestedFileName(): String {
+    private fun buildSuggestedFileName(extension: String): String {
         val methodName = state.targetMethodDisplayName
             ?.substringAfter('.')
             ?.substringBefore('(')
             ?: MyBundle.message("sequence.exportDefaultFileName")
-        return "$methodName${MyBundle.message("sequence.exportFileSuffix")}.png"
+        return "$methodName${MyBundle.message("sequence.exportFileSuffix")}.$extension"
     }
 
     override fun dispose() = Unit
+
+    private fun fileExtension(format: ClipboardExportFormat): String = when (format) {
+        ClipboardExportFormat.IMAGE -> "png"
+        ClipboardExportFormat.SVG -> "svg"
+        ClipboardExportFormat.MERMAID -> "mmd"
+    }
 }

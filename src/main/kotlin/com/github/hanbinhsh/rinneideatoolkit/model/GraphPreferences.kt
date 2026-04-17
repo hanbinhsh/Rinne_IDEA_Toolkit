@@ -58,6 +58,18 @@ enum class SequenceToolbarToggleId(val id: String) {
     }
 }
 
+enum class ClipboardExportFormat(val id: String) {
+    IMAGE("image"),
+    SVG("svg"),
+    MERMAID("mermaid"),
+    ;
+
+    companion object {
+        fun fromId(id: String?): ClipboardExportFormat =
+            values().firstOrNull { it.id == id } ?: IMAGE
+    }
+}
+
 data class GraphColorSettings(
     val rootFillHex: String = "#E0EBFF",
     val rootFillDarkHex: String = "#42608F",
@@ -366,6 +378,7 @@ data class GraphUiPreferences(
     val graphOptions: GraphOptions = GraphOptions(),
     val visibleToolbarToggles: Set<ToolbarToggleId> = ToolbarToggleId.defaultVisible(),
     val showWhiteBackgroundForExport: Boolean = false,
+    val copyButtonFormat: ClipboardExportFormat = ClipboardExportFormat.IMAGE,
     val colorSettings: GraphColorSettings = GraphColorSettings(),
 )
 
@@ -374,6 +387,7 @@ data class SequenceUiPreferences(
     val visibleToolbarToggles: Set<SequenceToolbarToggleId> = SequenceToolbarToggleId.defaultVisible(),
     val showWhiteBackgroundForExport: Boolean = false,
     val showWhiteBackgroundForCopy: Boolean = false,
+    val copyButtonFormat: ClipboardExportFormat = ClipboardExportFormat.IMAGE,
     val showReturnMessages: Boolean = false,
     val showActivationBars: Boolean = false,
     val showCreateMessages: Boolean = false,

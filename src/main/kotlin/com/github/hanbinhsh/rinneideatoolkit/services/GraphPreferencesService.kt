@@ -7,6 +7,7 @@ import com.intellij.openapi.components.Storage
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphColorSettings
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphOptions
 import com.github.hanbinhsh.rinneideatoolkit.model.GraphUiPreferences
+import com.github.hanbinhsh.rinneideatoolkit.model.ClipboardExportFormat
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceColorSettings
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceToolbarToggleId
 import com.github.hanbinhsh.rinneideatoolkit.model.SequenceUiPreferences
@@ -52,6 +53,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
         ),
         visibleToolbarToggles = state.visibleToolbarToggles.mapNotNull(ToolbarToggleId::fromId).toSet(),
         showWhiteBackgroundForExport = state.showWhiteBackgroundForExport,
+        copyButtonFormat = ClipboardExportFormat.fromId(state.graphCopyButtonFormat),
         colorSettings = GraphColorSettings(
             rootFillHex = state.rootFillHex,
             rootFillDarkHex = state.rootFillDarkHex,
@@ -108,6 +110,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
             drawArrowheadsOnTop = preferences.graphOptions.drawArrowheadsOnTop,
             showMapperTables = preferences.graphOptions.showMapperTables,
             showWhiteBackgroundForExport = preferences.showWhiteBackgroundForExport,
+            graphCopyButtonFormat = preferences.copyButtonFormat.id,
             visibleToolbarToggles = preferences.visibleToolbarToggles.map { it.id }.toMutableList(),
             rootFillHex = preferences.colorSettings.rootFillHex,
             rootFillDarkHex = preferences.colorSettings.rootFillDarkHex,
@@ -151,6 +154,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
             sequenceShowPrivateMethods = state.sequenceShowPrivateMethods,
             sequenceShowMapperTables = state.sequenceShowMapperTables,
             sequenceShowWhiteBackgroundForCopy = state.sequenceShowWhiteBackgroundForCopy,
+            sequenceCopyButtonFormat = state.sequenceCopyButtonFormat,
             sequenceShowReturnMessages = state.sequenceShowReturnMessages,
             sequenceShowActivationBars = state.sequenceShowActivationBars,
             sequenceShowCreateMessages = state.sequenceShowCreateMessages,
@@ -197,6 +201,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
         visibleToolbarToggles = state.visibleSequenceToolbarToggles.mapNotNull(SequenceToolbarToggleId::fromId).toSet(),
         showWhiteBackgroundForExport = state.showWhiteBackgroundForExport,
         showWhiteBackgroundForCopy = state.showWhiteBackgroundForExport,
+        copyButtonFormat = ClipboardExportFormat.fromId(state.sequenceCopyButtonFormat),
         showReturnMessages = state.sequenceShowReturnMessages,
         showActivationBars = state.sequenceShowActivationBars,
         showCreateMessages = state.sequenceShowCreateMessages,
@@ -246,6 +251,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
             visibleSequenceToolbarToggles = preferences.visibleToolbarToggles.map { it.id }.toMutableList(),
             showWhiteBackgroundForExport = preferences.showWhiteBackgroundForExport,
             sequenceShowWhiteBackgroundForCopy = preferences.showWhiteBackgroundForExport,
+            sequenceCopyButtonFormat = preferences.copyButtonFormat.id,
             sequenceShowReturnMessages = preferences.showReturnMessages,
             sequenceShowActivationBars = preferences.showActivationBars,
             sequenceShowCreateMessages = preferences.showCreateMessages,
@@ -321,6 +327,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
         var drawArrowheadsOnTop: Boolean = false,
         var showMapperTables: Boolean = false,
         var showWhiteBackgroundForExport: Boolean = false,
+        var graphCopyButtonFormat: String = ClipboardExportFormat.IMAGE.id,
         var visibleToolbarToggles: MutableList<String> = ToolbarToggleId.defaultVisible().map { it.id }.toMutableList(),
         var rootFillHex: String = "#E0EBFF",
         var rootFillDarkHex: String = "#42608F",
@@ -364,6 +371,7 @@ class GraphPreferencesService : PersistentStateComponent<GraphPreferencesService
         var sequenceShowPrivateMethods: Boolean = true,
         var sequenceShowMapperTables: Boolean = false,
         var sequenceShowWhiteBackgroundForCopy: Boolean = false,
+        var sequenceCopyButtonFormat: String = ClipboardExportFormat.IMAGE.id,
         var sequenceShowReturnMessages: Boolean = false,
         var sequenceShowActivationBars: Boolean = false,
         var sequenceShowCreateMessages: Boolean = false,
